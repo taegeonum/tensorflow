@@ -693,5 +693,33 @@ class StrategyClusterResolverTest(test.TestCase, parameterized.TestCase):
       self.assertAllInSet(resolver.task_type, ['chief', 'worker'])
 
 
+@combinations.generate(
+    combinations.combine(
+        strategy=[
+            strategy_combinations.central_storage_strategy_with_gpu_and_cpu,
+            # strategy_combinations.mirrored_strategy_with_cpu_1_and_2,
+            # strategy_combinations.multi_worker_mirrored_2x2_gpu,
+            # strategy_combinations.tpu_strategy
+        ],
+        mode=['eager']))
+class StrategyInitTest(test.TestCase):
+
+  def testMergeCallInitScope(self, strategy):
+    with strategy.scope():
+      @def_function.function
+      def big_fn():
+        def merge_fn(unused_strat):
+          y = constant_op.constant(11)
+          return y
+        def replica_fn():
+          with ops.init_scope():
+            y = ds_context.get_replica_context().merge_call(merge_fn)
+            z = y + 1
+            return z
+        return strategy.run(replica_fn)
+      result = big_fn()
+      print(result)
+
+
 if __name__ == '__main__':
   test_util.main()
