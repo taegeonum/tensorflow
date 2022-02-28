@@ -58,12 +58,18 @@ struct ProfileEvent {
   int64_t extra_event_metadata;
 };
 
-// A ring buffer of profile events.
-// This class is not thread safe.
+// A buffer of profile events. In general, the buffer works like a ring buffer.
+// However, when 'allow_dynamic_expansion' is set, a unlimitted number of buffer
+// entries is allowed and more profiling overhead could occur.
+// This class is *not thread safe*.
 class ProfileBuffer {
  public:
-  ProfileBuffer(uint32_t max_num_entries, bool enabled)
-      : enabled_(enabled), current_index_(0), event_buffer_(max_num_entries) {}
+  ProfileBuffer(uint32_t max_num_entries, bool enabled,
+                bool allow_dynamic_expansion = false)
+      : enabled_(enabled),
+        current_index_(0),
+        event_buffer_(max_num_entries),
+        allow_dynamic_expansion_(allow_dynamic_expansion) {}
 
   // Adds an event to the buffer with begin timestamp set to the current
   // timestamp. Returns a handle to event that can be used to call EndEvent. If
@@ -75,11 +81,7 @@ class ProfileBuffer {
       return kInvalidEventHandle;
     }
     uint64_t timestamp = time::NowMicros();
-    int index = current_index_ % event_buffer_.size();
-    if (current_index_ != 0 && index == 0) {
-      fprintf(stderr, "Warning: Dropping ProfileBuffer event.\n");
-      return current_index_;
-    }
+    const int index = GetNextEntryIndex();
     event_buffer_[index].tag = tag;
     event_buffer_[index].event_type = event_type;
     event_buffer_[index].event_metadata = event_metadata1;
@@ -132,11 +134,7 @@ class ProfileBuffer {
     if (!enabled_) {
       return;
     }
-    const int index = current_index_ % event_buffer_.size();
-    if (current_index_ != 0 && index == 0) {
-      fprintf(stderr, "Warning: Dropping ProfileBuffer event.\n");
-      return;
-    }
+    const int index = GetNextEntryIndex();
     event_buffer_[index].tag = tag;
     event_buffer_[index].event_type = event_type;
     event_buffer_[index].event_metadata = event_metadata1;
@@ -174,9 +172,26 @@ class ProfileBuffer {
   }
 
  private:
+  int GetNextEntryIndex() {
+    int index = current_index_ % event_buffer_.size();
+    if (current_index_ == 0 || index != 0) {
+      return index;
+    }
+
+    // Current buffer is full
+    if (!allow_dynamic_expansion_) {
+      fprintf(stderr, "Warning: Dropping ProfileBuffer event.\n");
+    } else {
+      fprintf(stderr, "Warning: Doubling internal profiling buffer.\n");
+      event_buffer_.resize(current_index_ * 2);
+    }
+    return current_index_;
+  }
+
   bool enabled_;
   uint32_t current_index_;
   std::vector<ProfileEvent> event_buffer_;
+  const bool allow_dynamic_expansion_;
 };
 
 }  // namespace profiling
